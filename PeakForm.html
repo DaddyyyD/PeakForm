@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PeakForm - Tactical Neumorphism</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Libraries for Image and PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #1a1c20;
+            --shadow-light: #24282d;
+            --shadow-dark: #101114;
+            --accent-blue: #38bdf8;
+            --accent-green: #bef264;
+            --accent-orange: #fb923c;
+        }
+        
+        body { 
+            font-family: 'Outfit', sans-serif; 
+            background-color: var(--bg-color);
+            color: #d1d5db; 
+            min-height: 100vh;
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* Neumorphic Protruding Card */
+        .neu-flat {
+            background: var(--bg-color);
+            box-shadow: 8px 8px 16px var(--shadow-dark), 
+                       -8px -8px 16px var(--shadow-light);
+            border-radius: 1.5rem;
+            border: 1px solid rgba(255,255,255,0.02);
+        }
+
+        /* Neumorphic Recessed/Pressed Card */
+        .neu-inset {
+            background: var(--bg-color);
+            box-shadow: inset 6px 6px 12px var(--shadow-dark), 
+                       inset -6px -6px 12px var(--shadow-light);
+            border-radius: 1.5rem;
+            border: none;
+        }
+
+        /* Active Tab State */
+        .tab-active { 
+            box-shadow: inset 4px 4px 8px var(--shadow-dark), 
+                       inset -4px -4px 8px var(--shadow-light);
+            color: var(--accent-blue);
+            font-weight: 700;
+        }
+
+        .tab-inactive {
+            box-shadow: 4px 4px 8px var(--shadow-dark), 
+                       -4px -4px 8px var(--shadow-light);
+            color: #6b7280;
+        }
+
+        /* Neumorphic Range Slider */
+        input[type="range"] { 
+            appearance: none;
+            width: 100%;
+            height: 8px;
+            background: var(--bg-color);
+            box-shadow: inset 2px 2px 5px var(--shadow-dark), 
+                       inset -2px -2px 5px var(--shadow-light);
+            border-radius: 10px;
+            outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            appearance: none;
+            width: 24px;
+            height: 24px;
+            background: var(--bg-color);
+            box-shadow: 3px 3px 6px var(--shadow-dark), 
+                       -3px -3px 6px var(--shadow-light);
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid var(--accent-blue);
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: var(--bg-color);
+            box-shadow: 10px 10px 20px var(--shadow-dark), 
+                       -10px -10px 20px var(--shadow-light);
+            color: var(--accent-blue);
+            padding: 1rem 2rem;
+            border-radius: 1rem;
+            font-weight: 800;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            pointer-events: none;
+        }
+
+        [x-cloak] { display: none !important; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+    </style>
+
+    <script>
+        function app() {
+            return {
+                tab: 'assess',
+                rhr: 70,
+                runTime: 35,
+                targetAltitude: 5400,
+                userWeight: 75,
+                userHeight: 175,
+                packWeight: 12,
+                trekDate: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                readinessScore: 0,
+                message: '',
+                isDownloading: false,
+                currentTraining: [],
+                currentDiet: [],
+                currentDietState: '',
+
+                init() {
+                    this.syncPlans();
+                },
+
+                showMessage(text) {
+                    this.message = text;
+                    setTimeout(() => this.message = '', 3000);
+                },
+
+                get daysToTrek() {
+                    const diffTime = new Date(this.trekDate) - new Date();
+                    return Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+                },
+
+                get bmi() {
+                    const heightM = parseFloat(this.userHeight) / 100;
+                    if (!heightM || heightM === 0) return 0;
+                    return (parseFloat(this.userWeight) / (heightM * heightM)).toFixed(1);
+                },
+
+                get bmiCategory() {
+                    const b = parseFloat(this.bmi);
+                    if (b < 18.5) return { label: 'UNDER-FUELED', color: 'text-orange-400', state: 'gain' };
+                    if (b < 25) return { label: 'PEAK MASS', color: 'text-emerald-400', state: 'maintain' };
+                    return { label: 'HEAVY BUILD', color: 'text-orange-400', state: 'lose' };
+                },
+
+                calculateScore() {
+                    let rhrVal = parseInt(this.rhr) || 70;
+                    let runVal = parseInt(this.runTime) || 35;
+                    let altVal = parseInt(this.targetAltitude) || 3000;
+
+                    let rhrPenalty = Math.max(0, (rhrVal - 55) * 0.8);
+                    let runPenalty = Math.max(0, (runVal - 22) * 1.5);
+                    const b = parseFloat(this.bmi);
+                    let bmiPenalty = (b > 25) ? (b - 25) * 4 : (b < 18.5) ? (18.5 - b) * 6 : 0;
+
+                    let timeFactor = (this.daysToTrek < 30) ? (30 - this.daysToTrek) * 0.8 : 0;
+                    let finalScore = Math.round(100 - (rhrPenalty + runPenalty + bmiPenalty + timeFactor) - (altVal / 1000 * 2.5));
+                    this.readinessScore = Math.max(5, Math.min(98, finalScore));
+                },
+
+                syncPlans() {
+                    this.calculateScore();
+                    const days = this.daysToTrek;
+                    
+                    const drills = {
+                        taper: ["Zone 1 Active Recovery", "Box Breathing (5s)", "Mobility Flow", "Mental Trek Visualization"],
+                        push: ["Weighted Step Ups (12kg)", "Interval Hill Sprints", "Plank Reach x 20", "HIIT Pulse Drill"],
+                        base: ["Nature Run (45min)", "Tempo Endurance", "Pack Load Walk", "Total Body Strength"]
+                    };
+
+                    const shuffle = (a) => a.sort(() => 0.5 - Math.random());
+
+                    if (days < 14) {
+                        this.currentTraining = [
+                            { name: "TACTICAL TAPER", goal: "CONSERVE", sessions: shuffle(drills.taper).slice(0, 3) },
+                            { name: "REPAIR MODULE", goal: "CELLULAR", sessions: ["Deep Stretching", "Hydration Focus"] }
+                        ];
+                    } else {
+                        this.currentTraining = [
+                            { name: "ENDURANCE INTEL", goal: "STAMINA", sessions: shuffle(drills.push).slice(0, 3) },
+                            { name: "BASE STABILITY", goal: "CORE", sessions: ["Isometric Planks", "Lower Body Isos"] }
+                        ];
+                    }
+
+                    const status = this.bmiCategory.state;
+                    this.currentDietState = status;
+                    const mealPool = {
+                        lose: { B: ["Oats", "Fruit"], L: ["Lentils", "Salad"], S: ["Almonds", "Tea"], D: ["Broth", "Soup"] },
+                        gain: { B: ["Eggs", "PB Toast"], L: ["Chicken", "Rice"], S: ["Shake", "Dates"], D: ["Paneer", "Roots"] },
+                        maintain: { B: ["Yogurt", "Muesli"], L: ["Dal", "Wrap"], S: ["Seeds", "Apple"], D: ["Grill", "Veggies"] }
+                    };
+                    const plan = mealPool[status];
+                    const daysNames = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+                    this.currentDiet = daysNames.map((day, i) => {
+                        let d = { 
+                            day, 
+                            b: plan.B[Math.floor(Math.random() * plan.B.length)], 
+                            l: plan.L[Math.floor(Math.random() * plan.L.length)], 
+                            s: plan.S[Math.floor(Math.random() * plan.S.length)], 
+                            d: plan.D[Math.floor(Math.random() * plan.D.length)], 
+                            cheat: (i === 2 || i === 5 || i === 6)
+                        };
+                        if (d.cheat) { d.s = "CHEAT MEAL"; d.d = (i === 5) ? "CHEAT MEAL" : d.d; d.l = (i === 6) ? "CHEAT MEAL" : d.l; }
+                        return d;
+                    });
+                    this.showMessage("MISSION LOG UPDATED");
+                },
+
+                get packRatio() {
+                    const weight = parseFloat(this.userWeight) || 75;
+                    const pack = parseFloat(this.packWeight) || 10;
+                    return ((pack / weight) * 100).toFixed(1);
+                },
+
+                async downloadDietImage() {
+                    this.isDownloading = true;
+                    const element = document.getElementById('diet-export-area');
+                    try {
+                        const canvas = await html2canvas(element, { backgroundColor: '#1a1c20', scale: 2 });
+                        const link = document.createElement('a');
+                        link.download = `PeakForm_Fuel_Plan.png`;
+                        link.href = canvas.toDataURL();
+                        link.click();
+                        this.showMessage("INTEL PNG CAPTURED");
+                    } catch (e) { this.showMessage("CAPTURE ERROR"); }
+                    this.isDownloading = false;
+                },
+
+                downloadTrainingPDF() {
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF();
+                    doc.setFontSize(22);
+                    doc.setTextColor(56, 189, 248);
+                    doc.text("PEAKFORM - MISSION LOG", 14, 22);
+                    doc.setFontSize(10);
+                    doc.setTextColor(40);
+                    doc.text(`Trek Date: ${this.trekDate} | Score: ${this.readinessScore}%`, 14, 30);
+                    const rows = this.currentTraining.map(p => [p.name, p.goal, p.sessions.join("\n")]);
+                    doc.autoTable({ startY: 40, head: [['PHASE', 'GOAL', 'DRILLS']], body: rows, theme: 'grid', headStyles: { fillColor: [26, 28, 32] } });
+                    doc.save(`PeakForm_Training_Plan.pdf`);
+                    this.showMessage("MISSION PDF SAVED");
+                }
+            }
+        }
+    </script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+</head>
+<body x-data="app()" x-cloak>
+
+    <div x-show="message" x-transition class="toast" x-text="message" style="display: none;"></div>
+
+    <!-- Mobile Header -->
+    <header class="p-8 pt-12 flex justify-between items-center">
+        <div class="flex items-center">
+            <!-- NEW NEUMORPHIC LOGO SYMBOL -->
+            <div class="neu-flat w-12 h-12 flex items-center justify-center mr-4">
+                <svg viewBox="0 0 24 24" class="w-8 h-8 filter drop-shadow-[0_0_8px_rgba(56,189,248,0.4)]" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 4L3 18H21L12 4Z" fill="url(#peakGradient)" stroke="#38bdf8" stroke-width="1.5" stroke-linejoin="round"/>
+                    <path d="M12 4L9 11L12 10L15 11L12 4Z" fill="white" fill-opacity="0.3"/>
+                    <defs>
+                        <linearGradient id="peakGradient" x1="12" y1="4" x2="12" y2="18" gradientUnits="userSpaceOnUse">
+                            <stop stop-color="#38bdf8"/>
+                            <stop offset="1" stop-color="#0ea5e9" stop-opacity="0.1"/>
+                        </linearGradient>
+                    </defs>
+                </svg>
+            </div>
+            <div>
+                <h1 class="text-2xl font-black tracking-tighter text-white uppercase italic">PEAK<span class="text-sky-400">FORM</span></h1>
+                <p class="text-[7px] uppercase tracking-[0.4em] text-slate-600 font-black">Tactical Bio-Intelligence</p>
+            </div>
+        </div>
+        <div class="text-right neu-flat px-4 py-2 rounded-2xl">
+            <span class="text-[8px] block font-black text-slate-500 uppercase mb-1">D-Day</span>
+            <span class="text-lg font-black text-white leading-none" x-text="daysToTrek + 'd'"></span>
+        </div>
+    </header>
+
+    <main class="p-6 pb-32 max-w-md mx-auto space-y-10">
+        
+        <!-- Tab Navigation (Neumorphic) -->
+        <nav class="flex justify-between gap-3 px-2">
+            <button @click="tab = 'assess'" :class="tab === 'assess' ? 'tab-active' : 'tab-inactive'" class="flex-1 py-3 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all">Intel</button>
+            <button @click="tab = 'plan'" :class="tab === 'plan' ? 'tab-active' : 'tab-inactive'" class="flex-1 py-3 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all">Drills</button>
+            <button @click="tab = 'diet'" :class="tab === 'diet' ? 'tab-active' : 'tab-inactive'" class="flex-1 py-3 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all">Fuel</button>
+            <button @click="tab = 'gear'" :class="tab === 'gear' ? 'tab-active' : 'tab-inactive'" class="flex-1 py-3 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all">Load</button>
+        </nav>
+
+        <!-- INTEL TAB -->
+        <section x-show="tab === 'assess'" class="space-y-10">
+            
+            <div class="grid grid-cols-2 gap-6">
+                <div class="neu-flat p-5 col-span-2">
+                    <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-3">Trek Date</label>
+                    <input type="date" x-model="trekDate" @change="calculateScore()" class="w-full bg-transparent text-white text-sm font-bold outline-none">
+                </div>
+
+                <div class="neu-inset p-5">
+                    <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2">Altitude</label>
+                    <div class="text-xl font-black text-sky-400 mb-4" x-text="targetAltitude + 'm'"></div>
+                    <input type="range" min="3000" max="8000" step="50" x-model="targetAltitude" @input="calculateScore()">
+                </div>
+
+                <div class="neu-inset p-5">
+                    <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest block mb-2">Resting HR</label>
+                    <div class="flex items-baseline gap-1 mb-4">
+                        <input type="number" x-model="rhr" @input="calculateScore()" class="w-12 bg-transparent text-2xl font-black text-orange-400 outline-none">
+                        <span class="text-[8px] font-black text-slate-600">BPM</span>
+                    </div>
+                    <div class="h-1 w-full neu-inset rounded-full overflow-hidden">
+                        <div class="h-full bg-orange-400/30" :style="'width:' + rhr + '%'"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Readiness HUD -->
+            <div class="neu-flat p-10 text-center relative overflow-hidden">
+                <div class="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent pointer-events-none"></div>
+                <h2 class="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] mb-6">Mission Readiness</h2>
+                <div class="inline-flex items-center justify-center w-40 h-40 neu-inset rounded-full mb-6">
+                    <span class="text-6xl font-black text-white tracking-tighter" x-text="readinessScore + '%'"></span>
+                </div>
+                <div class="text-[10px] font-black tracking-widest" :class="bmiCategory.color" x-text="bmiCategory.label + ' • ' + bmi + ' BMI'"></div>
+            </div>
+
+            <!-- Stats Inputs -->
+            <div class="neu-inset p-6 space-y-8">
+                <div class="flex justify-between gap-6 border-b border-white/5 pb-6">
+                    <div class="flex-1">
+                        <label class="text-[9px] font-black text-slate-500 uppercase block mb-3">Height (cm)</label>
+                        <input type="number" x-model="userHeight" @input="calculateScore()" class="w-full bg-transparent text-white text-sm font-bold outline-none neu-inset px-3 py-2">
+                    </div>
+                    <div class="flex-1">
+                        <label class="text-[9px] font-black text-slate-500 uppercase block mb-3">Mass (kg)</label>
+                        <input type="number" x-model="userWeight" @input="calculateScore()" class="w-full bg-transparent text-white text-sm font-bold outline-none neu-inset px-3 py-2">
+                    </div>
+                </div>
+                <div>
+                    <div class="flex justify-between items-center mb-5">
+                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest">5KM Run Speed</label>
+                        <span class="text-sm font-black text-emerald-400" x-text="runTime + ' MIN'"></span>
+                    </div>
+                    <input type="range" min="15" max="60" x-model="runTime" @input="calculateScore()">
+                </div>
+            </div>
+
+            <!-- Sync Button -->
+            <button @click="syncPlans()" class="w-full py-6 neu-flat text-[11px] font-black uppercase tracking-[0.3em] text-white active:shadow-inner hover:text-sky-400 transition-all">
+                Sync Mission Plan
+            </button>
+
+        </section>
+
+        <!-- DRILLS TAB -->
+        <section x-show="tab === 'plan'" class="space-y-8">
+            <div class="flex justify-between items-center mb-2 px-2">
+                <h2 class="text-[10px] font-black text-slate-500 uppercase tracking-widest">Training Drills</h2>
+                <button @click="downloadTrainingPDF()" class="neu-flat px-4 py-2 text-[8px] font-black text-sky-400 uppercase tracking-widest active:shadow-inner">Export PDF</button>
+            </div>
+            
+            <template x-for="phase in currentTraining" :key="phase.name">
+                <div class="neu-flat p-8">
+                    <div class="flex justify-between items-start mb-6">
+                        <div>
+                            <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1" x-text="phase.name"></h3>
+                            <div class="text-sm font-bold text-white uppercase italic" x-text="phase.goal"></div>
+                        </div>
+                    </div>
+                    <ul class="space-y-4">
+                        <template x-for="session in phase.sessions" :key="session">
+                            <li class="flex items-center text-xs text-slate-400 font-medium p-3 neu-inset">
+                                <div class="w-1.5 h-1.5 rounded-full bg-sky-400/50 mr-4"></div>
+                                <span x-text="session"></span>
+                            </li>
+                        </template>
+                    </ul>
+                </div>
+            </template>
+        </section>
+
+        <!-- FUEL TAB -->
+        <section x-show="tab === 'diet'" class="space-y-8">
+            <div class="flex justify-between items-center mb-2 px-2">
+                <h2 class="text-[10px] font-black text-slate-500 uppercase tracking-widest">Nutrition Matrix</h2>
+                <button @click="downloadDietImage()" class="neu-flat px-4 py-2 text-[8px] font-black text-sky-400 uppercase tracking-widest active:shadow-inner">
+                    <span x-text="isDownloading ? 'Processing...' : 'Export PNG'"></span>
+                </button>
+            </div>
+
+            <div id="diet-export-area" class="neu-flat p-4 overflow-x-auto">
+                <table class="w-full text-[9px] tracking-widest">
+                    <thead>
+                        <tr class="text-slate-500">
+                            <th class="p-3 text-left">DAY</th>
+                            <th class="p-3 text-left">B</th>
+                            <th class="p-3 text-left">L</th>
+                            <th class="p-3 text-left">S</th>
+                            <th class="p-3 text-left">D</th>
+                        </tr>
+                    </thead>
+                    <tbody class="font-bold text-white">
+                        <template x-for="item in currentDiet" :key="item.day">
+                            <tr :class="item.cheat ? 'bg-orange-400/[0.03]' : ''">
+                                <td class="p-3 text-slate-600 font-black" x-text="item.day"></td>
+                                <td class="p-3" x-text="item.b"></td>
+                                <td class="p-3" x-text="item.l"></td>
+                                <td class="p-3" :class="item.cheat ? 'text-orange-400' : ''" x-text="item.s"></td>
+                                <td class="p-3" x-text="item.d"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- PAYLOAD TAB -->
+        <section x-show="tab === 'gear'">
+            <div class="neu-flat p-10 text-center space-y-12">
+                <div class="space-y-3">
+                    <h2 class="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em]">Payload Configuration</h2>
+                    <div class="text-6xl font-black tracking-tighter" :class="parseFloat(packRatio) > 20 ? 'text-orange-400' : 'text-white'" x-text="packRatio + '%'"></div>
+                    <p class="text-[8px] font-black text-slate-600 uppercase tracking-widest">Structural Burden</p>
+                </div>
+
+                <div class="space-y-6">
+                    <div class="flex justify-between text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                        <span>Cargo Mass</span>
+                        <span class="text-sky-400" x-text="packWeight + ' KG'"></span>
+                    </div>
+                    <input type="range" min="1" max="35" x-model="packWeight">
+                </div>
+
+                <div class="p-5 neu-inset">
+                    <p class="text-[9px] font-medium text-slate-500 uppercase tracking-[0.2em] leading-relaxed">
+                        Mission requirement: Maintain <span class="text-white">under 20%</span> load ratio for structural longevity.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- App Bottom Space -->
+    <div class="h-24"></div>
+</body>
+</html>
